@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useSyncExternalStore } from 'react';
+import React, { useEffect, useState, useSyncExternalStore } from 'react';
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -10,7 +10,10 @@ import {
   Box,
   Button,
   Chip,
+  CircularProgress,
   Container,
+  IconButton,
+  InputAdornment,
   Paper,
   Stack,
   Tab,
@@ -21,13 +24,18 @@ import {
   TableHead,
   TableRow,
   Tabs,
+  TextField,
   Toolbar,
   Typography,
 } from '@mui/material';
 import { DataGrid, GridColDef } from '@mui/x-data-grid';
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
+import LockOutlinedIcon from '@mui/icons-material/LockOutlined';
+import LogoutIcon from '@mui/icons-material/Logout';
 import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
 import TableViewIcon from '@mui/icons-material/TableView';
+import Visibility from '@mui/icons-material/Visibility';
+import VisibilityOff from '@mui/icons-material/VisibilityOff';
 import {
   classes as SCHOOL_CLASSES,
   coachingClass,
@@ -276,6 +284,14 @@ export default function HomePage() {
     () => true,
     () => false
   );
+  const [authChecked, setAuthChecked] = useState<boolean>(false);
+  const [authenticatedUser, setAuthenticatedUser] = useState<string | null>(null);
+  const [loginUsername, setLoginUsername] = useState<string>('');
+  const [loginPassword, setLoginPassword] = useState<string>('');
+  const [showPassword, setShowPassword] = useState<boolean>(false);
+  const [loginLoading, setLoginLoading] = useState<boolean>(false);
+  const [loginError, setLoginError] = useState<string>('');
+
   const [activeTab, setActiveTab] = useState<number>(0);
   const [classSubTab, setClassSubTab] = useState<number>(0);
   const [teacherSubTab, setTeacherSubTab] = useState<number>(0);
@@ -291,6 +307,58 @@ export default function HomePage() {
   const [totalScheduled, setTotalScheduled] = useState<number>(0);
   const [selectedClass, setSelectedClass] = useState<string>(SCHOOL_CLASSES[0]);
   const [error, setError] = useState<string>('');
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/auth/session')
+      .then((res) => res.json())
+      .then((data: { authenticated?: boolean; username?: string }) => {
+        if (!cancelled) {
+          setAuthenticatedUser(data.authenticated ? data.username || 'admin' : null);
+          setAuthChecked(true);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setAuthenticatedUser(null);
+          setAuthChecked(true);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const handleLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoginError('');
+    setLoginLoading(true);
+    try {
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: loginUsername, password: loginPassword }),
+      });
+      const data = (await res.json()) as { authenticated?: boolean; username?: string; error?: string };
+      if (!res.ok || !data.authenticated) {
+        setLoginError(data.error || 'Invalid username or password.');
+        return;
+      }
+      setAuthenticatedUser(data.username || loginUsername);
+      setLoginPassword('');
+    } catch {
+      setLoginError('Unable to reach authentication server.');
+    } finally {
+      setLoginLoading(false);
+    }
+  };
+
+  const handleLogout = async () => {
+    await fetch('/api/auth/logout', { method: 'POST' });
+    setAuthenticatedUser(null);
+    setLoginUsername('');
+    setLoginPassword('');
+  };
 
   const teacherAllotmentColumns: GridColDef<TeacherRow>[] = [
     { field: 'id', headerName: 'S.No', width: 70 },
@@ -410,6 +478,116 @@ export default function HomePage() {
     return null;
   }
 
+  if (!authChecked) {
+    return (
+      <Box
+        sx={{
+          minHeight: '100vh',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          bgcolor: '#f5f7fb',
+        }}
+      >
+        <CircularProgress />
+      </Box>
+    );
+  }
+
+  if (!authenticatedUser) {
+    return (
+      <Box
+        sx={{
+          minHeight: '100vh',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          bgcolor: '#f5f7fb',
+          px: 2,
+        }}
+      >
+        <Paper elevation={3} sx={{ p: 4, maxWidth: 420, width: '100%', borderRadius: 3 }}>
+          <Stack spacing={2.5} component="form" onSubmit={handleLogin}>
+            <Box sx={{ textAlign: 'center' }}>
+              <Box
+                sx={{
+                  width: 48,
+                  height: 48,
+                  borderRadius: '50%',
+                  bgcolor: 'primary.main',
+                  color: 'white',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  mb: 1.5,
+                }}
+              >
+                <LockOutlinedIcon />
+              </Box>
+              <Typography variant="h5" sx={{ fontWeight: 700 }}>
+                Velammal Vidyalaya
+              </Typography>
+              <Typography variant="body2" color="text.secondary">
+                Sign in to access the Timetable Generator
+              </Typography>
+            </Box>
+
+            {loginError && (
+              <Alert severity="error" onClose={() => setLoginError('')}>
+                {loginError}
+              </Alert>
+            )}
+
+            <TextField
+              label="Username"
+              value={loginUsername}
+              onChange={(e) => setLoginUsername(e.target.value)}
+              fullWidth
+              required
+              autoFocus
+              autoComplete="username"
+            />
+
+            <TextField
+              label="Password"
+              type={showPassword ? 'text' : 'password'}
+              value={loginPassword}
+              onChange={(e) => setLoginPassword(e.target.value)}
+              fullWidth
+              required
+              autoComplete="current-password"
+              slotProps={{
+                input: {
+                  endAdornment: (
+                    <InputAdornment position="end">
+                      <IconButton
+                        aria-label="toggle password visibility"
+                        onClick={() => setShowPassword((prev) => !prev)}
+                        edge="end"
+                      >
+                        {showPassword ? <VisibilityOff /> : <Visibility />}
+                      </IconButton>
+                    </InputAdornment>
+                  ),
+                },
+              }}
+            />
+
+            <Button
+              type="submit"
+              variant="contained"
+              size="large"
+              disabled={loginLoading}
+              sx={{ fontWeight: 700, py: 1.25 }}
+            >
+              {loginLoading ? 'Signing in...' : 'Sign In'}
+            </Button>
+          </Stack>
+        </Paper>
+      </Box>
+    );
+  }
+
   const currentIXClass = classSubTab < 3 ? secClassTimeIX[classSubTab] : null;
   const currentXClass = classSubTab >= 3 ? secClassTimeX[classSubTab - 3] : null;
   const currentTeacherSheet = teacherTimetables[teacherSubTab];
@@ -428,15 +606,31 @@ export default function HomePage() {
               Poonamallee • Secondary Compartment (IX &amp; X) • 2026–27
             </Typography>
           </Box>
-          <Button
-            variant="contained"
-            color="secondary"
-            startIcon={<AutoAwesomeIcon />}
-            onClick={handleGenerateTimetable}
-            sx={{ fontWeight: 700, px: 3 }}
-          >
-            Generate Timetable
-          </Button>
+          <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center' }}>
+            <Chip
+              label={authenticatedUser}
+              size="small"
+              sx={{ bgcolor: 'rgba(255,255,255,0.18)', color: 'white', fontWeight: 600 }}
+            />
+            <Button
+              variant="contained"
+              color="secondary"
+              startIcon={<AutoAwesomeIcon />}
+              onClick={handleGenerateTimetable}
+              sx={{ fontWeight: 700, px: 3 }}
+            >
+              Generate Timetable
+            </Button>
+            <Button
+              variant="outlined"
+              color="inherit"
+              startIcon={<LogoutIcon />}
+              onClick={handleLogout}
+              sx={{ borderColor: 'rgba(255,255,255,0.5)' }}
+            >
+              Logout
+            </Button>
+          </Stack>
         </Toolbar>
       </AppBar>
 
